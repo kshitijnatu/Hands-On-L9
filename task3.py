@@ -27,7 +27,9 @@ raw_stream = (
 parsed_df = raw_stream.select(from_json(col("value"), schema).alias("data")).select("data.*")
 
 # Convert timestamp column to TimestampType and add a watermark
-with_event_time = parsed_df.withColumn("event_time", to_timestamp(col("timestamp")))
+with_event_time = parsed_df.withColumn(
+    "event_time", to_timestamp(col("timestamp"), "yyyy-MM-dd HH:mm:ss")
+)
 watermarked_df = with_event_time.withWatermark("event_time", "1 minute")
 
 # Perform windowed aggregation: sum of fare_amount over a 5-minute window sliding by 1 minute
@@ -47,28 +49,21 @@ result_df = windowed_df.select(
 
 # Define a function to write each batch to a CSV file with column names
 def write_batch(batch_df, batch_id):
-    if batch_df.rdd.isEmpty():
+    if len(batch_df.take(1)) == 0:
         return
 
     output_path = f"outputs/task_3/batch_{batch_id}"
 
     # Save the batch DataFrame as a CSV file with headers included
-    (
-        batch_df
-        .coalesce(1)
-        .write
-        .mode("overwrite")
-        .option("header", True)
-        .csv(output_path)
-    )
+    batch_df.coalesce(1).write.mode("overwrite").option("header", True).csv(output_path)
 
 
 # Use foreachBatch to apply the function to each micro-batch
 query = (
     result_df.writeStream
-    .outputMode("append")
+    .outputMode("update")
     .foreachBatch(write_batch)
-    .option("checkpointLocation", "outputs/checkpoints/task_3_csv")
+    .option("checkpointLocation", "outputs/checkpoints/task_3_csv_v2")
     .start()
 )
 
